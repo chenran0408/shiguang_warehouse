@@ -182,3 +182,8 @@ schools:
     name: "苏州大学"
     initial: "S"
     resource_folder: "SUDA"
+
+  - id: "CQRK"
+    name: "重庆人文科技学院"
+    initial: "C"
+    resource_folder: "CQRK"    
