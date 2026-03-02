@@ -206,6 +206,12 @@ schools:
   - id: "AHSZU"
     name: "宿州学院"
     initial: "S"
+    resource_folder: "AHSZU"    
+
+    - id: "HUAT"
+    name: "湖北汽车工业学院"
+    initial: "H"
+    resource_folder: "HUAT"    
     resource_folder: "AHSZU"
 
   - id: "XAUT"
