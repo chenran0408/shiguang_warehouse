@@ -1,0 +1,8 @@
+adapters:
+  - adapter_id: "YU_01"
+    adapter_name: "长江大学教务系统（树维）"
+    category: "BACHELOR_AND_ASSOCIATE"
+    asset_js_path: "yu.js"
+    import_url: "https://ehall.yangtzeu.edu.cn"
+    maintainer: "Jursin"
+    description: "长江大学教务系统（树维）适配"
