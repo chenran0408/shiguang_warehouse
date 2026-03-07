@@ -232,3 +232,8 @@ schools:
     name: "广西电力职业技术学院"
     initial: "G"
     resource_folder: "GXDLXY"
+
+  - id: "YANGTZEU"
+    name: "长江大学"
+    initial: "C"
+    resource_folder: "YANGTZEU"
