@@ -1,0 +1,9 @@
+# resources/CUST/adapters.yaml
+adapters:
+  - adapter_id: "CAPU"
+    adapter_name: "成都航空职业技术大学教务"
+    category: "BACHELOR_AND_ASSOCIATE"
+    asset_js_path: "capadap.js"
+    import_url: "https://webvpn.cap.edu.cn/"
+    maintainer: "Xuan-Xuann"
+    description: "适配成都航空职业技术大学教务系统"

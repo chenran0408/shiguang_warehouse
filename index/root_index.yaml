@@ -237,3 +237,8 @@ schools:
     name: "长江大学"
     initial: "C"
     resource_folder: "YANGTZEU"
+
+  - id: "CAPU"
+    name: "成都航空职业技术大学"
+    initial: "C"
+    resource_folder: "CAPU"
