@@ -129,30 +129,30 @@ function getPresetTimeSlots() {
     if (isSummer) {
         // 夏季作息
         return [
-            { number: 1,  startTime: "08:10", endTime: "08:55" },
-            { number: 2,  startTime: "09:05", endTime: "09:50" },
-            { number: 3,  startTime: "10:10", endTime: "10:55" },
-            { number: 4,  startTime: "11:05", endTime: "11:50" },
-            { number: 5,  startTime: "14:45", endTime: "15:30" },
-            { number: 6,  startTime: "15:40", endTime: "16:25" },
-            { number: 7,  startTime: "16:40", endTime: "17:25" },
-            { number: 8,  startTime: "17:35", endTime: "18:20" },
-            { number: 9,  startTime: "19:30", endTime: "20:15" },
+            { number: 1, startTime: "08:10", endTime: "08:55" },
+            { number: 2, startTime: "09:05", endTime: "09:50" },
+            { number: 3, startTime: "10:10", endTime: "10:55" },
+            { number: 4, startTime: "11:05", endTime: "11:50" },
+            { number: 5, startTime: "14:45", endTime: "15:30" },
+            { number: 6, startTime: "15:40", endTime: "16:25" },
+            { number: 7, startTime: "16:40", endTime: "17:25" },
+            { number: 8, startTime: "17:35", endTime: "18:20" },
+            { number: 9, startTime: "19:30", endTime: "20:15" },
             { number: 10, startTime: "20:25", endTime: "21:10" },
             { number: 11, startTime: "21:20", endTime: "22:05" }
         ];
     } else {
         // 春秋冬季作息
         return [
-            { number: 1,  startTime: "08:20", endTime: "09:05" },
-            { number: 2,  startTime: "09:05", endTime: "10:00" },
-            { number: 3,  startTime: "10:20", endTime: "11:05" },
-            { number: 4,  startTime: "11:15", endTime: "12:00" },
-            { number: 5,  startTime: "14:30", endTime: "15:15" },
-            { number: 6,  startTime: "15:25", endTime: "16:10" },
-            { number: 7,  startTime: "16:25", endTime: "17:10" },
-            { number: 8,  startTime: "17:20", endTime: "18:05" },
-            { number: 9,  startTime: "19:10", endTime: "19:55" },
+            { number: 1, startTime: "08:20", endTime: "09:05" },
+            { number: 2, startTime: "09:05", endTime: "10:00" },
+            { number: 3, startTime: "10:20", endTime: "11:05" },
+            { number: 4, startTime: "11:15", endTime: "12:00" },
+            { number: 5, startTime: "14:30", endTime: "15:15" },
+            { number: 6, startTime: "15:25", endTime: "16:10" },
+            { number: 7, startTime: "16:25", endTime: "17:10" },
+            { number: 8, startTime: "17:20", endTime: "18:05" },
+            { number: 9, startTime: "19:10", endTime: "19:55" },
             { number: 10, startTime: "20:05", endTime: "20:50" },
             { number: 11, startTime: "21:00", endTime: "21:45" }
         ];
@@ -160,11 +160,64 @@ function getPresetTimeSlots() {
 }
 
 /**
- * 返回全局课表基础配置（单节课时长与课间休息时长）。
- * @returns {{ defaultClassDuration: number, defaultBreakDuration: number }}
+ * 从教学周历页面推断学期开学日期（YYYY-MM-DD）。
+ * 解析策略：
+ * 1) 优先读取第 1 周对应的周一日期；
+ * 2) 若未命中，则在周历表中收集全部日期并取最小值兜底。
+ * @returns {Promise<string|null>} 开学日期字符串；无法解析时返回 null
  */
-function getCourseConfig() {
+async function getStartDate() {
+    // 请求教学周历页面（包含每周日期映射）
+    const response = await fetch('/jsxsd/jxzl/jxzl_query', { method: 'GET' });
+    const htmlText = await response.text();
+    const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+
+    // 周历主表格，日期信息存放在单元格 title 属性中
+    const table = doc.querySelector("#kbtable");
+    if (!table) {
+        console.log("未找到周历表格 #kbtable");
+        return null;
+    }
+
+    // 将“YYYY年M月D日”转为“YYYY-MM-DD”
+    const parseCNDate = (text) => {
+        const m = String(text).match(/(\d{4})年(\d{1,2})月(\d{1,2})/);
+        if (!m) return null;
+        const [, y, mo, d] = m;
+        return `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    };
+
+    // 优先取“第1周 + 星期一”
+    const week1Row = Array.from(table.querySelectorAll("tr")).find((tr) => {
+        const first = tr.cells?.[0]?.textContent?.trim();
+        return first === "1";
+    });
+
+    let start = null;
+    if (week1Row && week1Row.cells[1]) {
+        start = parseCNDate(week1Row.cells[1].getAttribute("title"));
+    }
+
+    // 兜底：从所有日期里取最小值
+    if (!start) {
+        const allDates = Array.from(table.querySelectorAll("td[title]"))
+            .map((td) => parseCNDate(td.getAttribute("title")))
+            .filter(Boolean)
+            .sort();
+        start = allDates[0] || null;
+    }
+
+    console.log("开学日期：", start || "未找到");
+    return start;
+}
+/**
+ * 返回全局课表基础配置（单节课时长与课间休息时长）。
+ * @returns {Promise<{ semesterStartDate: string|null, defaultClassDuration: number, defaultBreakDuration: number }>}
+ */
+async function getCourseConfig() {
+    const semesterStartDate = await getStartDate();
     return {
+        semesterStartDate: semesterStartDate,
         defaultClassDuration: 45,
         defaultBreakDuration: 10
     };
@@ -222,7 +275,7 @@ async function runImportFlow() {
 
         console.log(`[HUSE] 成功解析 ${courses.length} 门课程。`);
 
-        const config = getCourseConfig();
+        const config = await getCourseConfig();
         const timeSlots = getPresetTimeSlots();
 
         // 浏览器调试环境：输出结果后退出，不执行 APP 存储逻辑
