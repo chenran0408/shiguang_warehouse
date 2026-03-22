@@ -307,3 +307,8 @@ schools:
     name: "湖南信息职业技术学院"
     initial: "H"
     resource_folder: "HNIU"  
+
+  - id: "HUEL"
+    name: "河南财经政法大学"
+    initial: "H"
+    resource_folder: "HUEL"
