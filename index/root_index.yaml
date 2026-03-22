@@ -312,3 +312,8 @@ schools:
     name: "河南财经政法大学"
     initial: "H"
     resource_folder: "HUEL"
+
+  - id: "GLMU"
+    name: "桂林医科大学"
+    initial: "G"
+    resource_folder: "GLMU"
