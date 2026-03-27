@@ -133,7 +133,7 @@ async function promptUserToStart() {
 async function getAcademicYear() {
     return await window.AndroidBridgePromise.showPrompt(
         "学年设置",
-        "请输入本学年开始的年份（例如 2024）",
+        "请输入本学年开始的年份\n（例如 2024，代表 2024-2025 学年）",
         "2024",
         "validateYearInput"  // 传入验证函数名
     );
