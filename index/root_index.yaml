@@ -362,3 +362,8 @@ schools:
     name: "湖北医药学院"
     initial: "H"
     resource_folder: "HBMU"
+
+  - id: "XATU"
+    name: "西安工业大学"
+    initial: "X"
+    resource_folder: "XATU"
