@@ -407,7 +407,7 @@
             teacherUnresolvedExpression: stats.teacherUnresolvedExpression
         });
 
-        return mergeContiguousSections(courses);
+        return splitLongBlocksToDoubleLessons(mergeContiguousSections(courses));
     }
 
     // 从 TaskActivity 块前的代码中反解析教师真实姓名
@@ -470,7 +470,29 @@
         }
         return merged;
     }
-
+    function splitLongBlocksToDoubleLessons(courses) {
+    const result = [];
+    for (const c of courses) {
+        const len = c.endSection - c.startSection + 1;
+        if (len === 4) {
+            // 拆为前2节
+            result.push({
+                ...c,
+                startSection: c.startSection,
+                endSection: c.startSection + 1,
+            });
+            // 后2节
+            result.push({
+                ...c,
+                startSection: c.startSection + 2,
+                endSection: c.endSection,
+            });
+        } else {
+            result.push({ ...c });
+        }
+    }
+    return result;
+}
     // 用你学校的真实作息时间替换原 getPresetTimeSlots
     function getPresetTimeSlots() {
         return [
@@ -489,7 +511,7 @@
         ];
     }
 
-    // 🔥 新增：导出纯净JSON文件函数（适配课程表App）
+    // 导出纯净JSON文件函数（适配课程表App）
     function exportCleanJson(courses, timeSlots) {
         const cleanExportData = {
             courses: courses,
@@ -506,8 +528,8 @@
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
 
-        console.log(`✅ 成功导出纯净JSON文件，包含 ${courses.length} 门课程`);
-        console.log('📌 该文件可直接用于【课程文件导入】→【导入 json 文件】');
+        console.log(`成功导出纯净JSON文件，包含 ${courses.length} 门课程`);
+        console.log('该文件可直接用于【课程文件导入】→【导入 json 文件】');
     }
 
     async function runImportFlow() {
