@@ -250,21 +250,9 @@
         return list;
     }
 
-    // 将教务系统的节次映射到 TimeSlots 编号
-    // 教务系统返回的节次顺序: 1-6为正常排列，7为午间课，8为晚间课
-    // TimeSlots 的顺序: 完全按时间排列，3为午间课，6为晚间课
+    // 节次编号顺序一一对应，无需特殊映射
     function mapSectionToTimeSlotNumber(section) {
-        const mapping = {
-            1: 1,
-            2: 2,
-            3: 4,
-            4: 5,
-            5: 7,
-            6: 8,
-            7: 3,
-            8: 6
-        };
-        return mapping[section] || section;
+        return section;
     }
 
     // 反引号化 JavaScript 字面量字符串，处理转义字符
@@ -342,21 +330,11 @@
 
     /**
      * 从课表响应的 JavaScript 脚本中解析课程（树维教务核心解析逻辑）
-     *
-     * 树维系统返回的 HTML 中，表格单元格是空的，真正的课程数据在 <script> 中：
-     * var unitCount = 8;  // 每天的节次数
-     * activity = new TaskActivity(teacherId, teacherName, courseId, courseName, ...);
-     * index = day * unitCount + section;  // 计算课程在二维表格中的位置
-     * table0.activities[index] = activity;
-     *
-     * @param {string} htmlText - 课表响应的完整 HTML
-     * @returns {Array} 课程数组
      */
     function parseCoursesFromTaskActivityScript(htmlText) {
         const text = String(htmlText || "");
         if (!text) return [];
 
-        // 提取 unitCount（每天的节次数，通常为 8）
         const unitCountMatch = text.match(/\bvar\s+unitCount\s*=\s*(\d+)\s*;/);
         const unitCount = unitCountMatch ? parseInt(unitCountMatch[1], 10) : 0;
         if (!Number.isInteger(unitCount) || unitCount <= 0) return [];
@@ -367,8 +345,7 @@
             teacherRecovered: 0,
             teacherUnresolvedExpression: 0
         };
-        // 匹配所有 TaskActivity 构造调用块
-        // TaskActivity 参数顺序: teacherId, teacherName, courseId, courseName, classId, room, weekBitmap, ...
+
         const blockRe = /activity\s*=\s*new\s+TaskActivity\(([^]*?)\)\s*;\s*index\s*=\s*(?:(\d+)\s*\*\s*unitCount\s*\+\s*(\d+)|(\d+))\s*;\s*table\d+\.activities\[index\]/g;
         let match;
 
@@ -378,7 +355,6 @@
             const args = splitJsArgs(argsText);
             if (args.length < 7) continue;
 
-            // 解析 index 计算表达式，确定星期几和第几节
             const dayPart = match[2];
             const sectionPart = match[3];
             const directIndexPart = match[4];
@@ -392,16 +368,12 @@
 
             if (!Number.isInteger(indexValue) || indexValue < 0) continue;
 
-            // 从线性索引反推星期和节次
             const day = Math.floor(indexValue / unitCount) + 1;
             let section = (indexValue % unitCount) + 1;
-            // 将教务系统的节次映射到 TimeSlots 编号
             section = mapSectionToTimeSlotNumber(section);
             if (day < 1 || day > 7 || section < 1 || section > 16) continue;
 
-            // 提取课程字段：教师(args[1])、课程名(args[3])、教室(args[5])、周次位图(args[6])
             let teacher = unquoteJsLiteral(args[1]);
-            // 如果教师名是表达式（如 actTeacherName.join(',')），反向解析真实姓名
             if (teacher && !/^['"]/.test(String(args[1]).trim()) && /join\s*\(/.test(String(args[1]))) {
                 const resolved = resolveTeachersForTaskActivityBlock(text, match.index);
                 if (resolved) {
@@ -415,7 +387,6 @@
             const position = unquoteJsLiteral(args[5]);
             const weekBitmap = unquoteJsLiteral(args[6]);
             const weeks = normalizeWeeks(parseValidWeeksBitmap(weekBitmap));
-
             if (!name) continue;
 
             courses.push({
@@ -440,9 +411,7 @@
     }
 
     // 从 TaskActivity 块前的代码中反解析教师真实姓名
-    // 树维系统会先定义 var actTeachers = [{id:123, name:"张三"}]，再用 actTeacherName.join(',') 传参
     function resolveTeachersForTaskActivityBlock(fullText, blockStartIndex) {
-        // 向前搜索最近的 actTeachers 变量定义（一般在前 2000 字符内）
         const start = Math.max(0, blockStartIndex - 2200);
         const segment = fullText.slice(start, blockStartIndex);
         const re = /var\s+actTeachers\s*=\s*\[([^]*?)\]\s*;/g;
@@ -502,31 +471,31 @@
         return merged;
     }
 
+    // 用你学校的真实作息时间替换原 getPresetTimeSlots
     function getPresetTimeSlots() {
         return [
-            { number: 1, startTime: "08:00", endTime: "09:35" },
-            { number: 2, startTime: "10:05", endTime: "11:40" },
-            { number: 3, startTime: "12:00", endTime: "13:35" }, // 午间课
-            { number: 4, startTime: "14:00", endTime: "15:35" },
-            { number: 5, startTime: "16:05", endTime: "17:40" },
-            { number: 6, startTime: "17:45", endTime: "18:30" }, // 晚间课，部分课程为 18:00-18:45
-            { number: 7, startTime: "19:00", endTime: "20:35" },
-            { number: 8, startTime: "20:45", endTime: "22:20" }
+            { number: 1,  startTime: "08:20", endTime: "09:05" },
+            { number: 2,  startTime: "09:15", endTime: "10:00" },
+            { number: 3,  startTime: "10:20", endTime: "11:05" },
+            { number: 4,  startTime: "11:15", endTime: "12:00" },
+            { number: 5,  startTime: "14:00", endTime: "14:45" },
+            { number: 6,  startTime: "14:55", endTime: "15:40" },
+            { number: 7,  startTime: "16:00", endTime: "16:45" },
+            { number: 8,  startTime: "16:55", endTime: "17:40" },
+            { number: 9,  startTime: "18:10", endTime: "18:55" },
+            { number: 10, startTime: "19:05", endTime: "19:50" },
+            { number: 11, startTime: "20:00", endTime: "20:45" },
+            { number: 12, startTime: "20:55", endTime: "21:40" }
         ];
     }
 
     // 🔥 新增：导出纯净JSON文件函数（适配课程表App）
     function exportCleanJson(courses, timeSlots) {
-        // 🔑 构造纯净结构：仅包含App所需的 courses 和 timeSlots 字段
         const cleanExportData = {
             courses: courses,
             timeSlots: timeSlots
         };
-
-        // 序列化为JSON字符串
         const jsonString = JSON.stringify(cleanExportData, null, 2);
-
-        // 创建下载
         const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -546,7 +515,6 @@
         recordDiag("start", `base=${BASE}`);
         safeToast("开始自动探测西安工业大学教务参数...");
 
-        // 1) 探测学生 ID（ids）和学期选择组件 ID（tagId）
         recordDiag("detect_params", "request entry page");
         const entryUrl = `${BASE}/eams/courseTableForStd.action?&sf_request_type=ajax`;
         const entryHtml = await requestText(entryUrl, {
@@ -565,7 +533,6 @@
             return;
         }
 
-        // 2) 获取学期列表并让用户选择（最近 8 个）
         recordDiag("load_semesters", "request semester list");
         const semesterRaw = await requestText(`${BASE}/eams/dataQuery.action?sf_request_type=ajax`, {
             method: "POST",
@@ -598,7 +565,6 @@
         recordDiag("select_semester", `selected=${selectedSemester.id}`);
         safeToast("正在获取课表数据...");
 
-        // 3) 拉取选定学期的课表 HTML
         recordDiag("load_courses", "request course table html");
         const courseHtml = await requestText(`${BASE}/eams/courseTableForStd!courseTable.action?sf_request_type=ajax`, {
             method: "POST",
@@ -612,7 +578,6 @@
             ].join("&")
         });
 
-        // 4) 解析课表脚本
         const courses = parseCoursesFromTaskActivityScript(courseHtml);
         recordDiag("parse_courses", `count=${courses.length}`);
 
@@ -642,7 +607,6 @@
             return;
         }
 
-        // 🔥 获取预设时间段
         const timeSlots = getPresetTimeSlots();
 
         recordDiag("save_courses", `count=${courses.length}`);
@@ -651,15 +615,12 @@
             sample: courses.slice(0, 3)
         });
 
-        // 保存到应用
         await window.AndroidBridgePromise.saveImportedCourses(JSON.stringify(courses));
         await window.AndroidBridgePromise.savePresetTimeSlots(JSON.stringify(timeSlots));
 
-        // 🔥 同时保存到 localStorage（兼容原脚本）
         localStorage.setItem('xatu_courses', JSON.stringify(courses));
         localStorage.setItem('xatu_timeSlots', JSON.stringify(timeSlots));
-        
-        // 🔥 自动弹窗询问是否导出纯净JSON文件
+
         if (confirm(`✅ 课程导入成功！\n共 ${courses.length} 门课程\n\n是否同时导出纯净JSON文件？\n（可用于备份或手动导入其他设备）`)) {
             exportCleanJson(courses, timeSlots);
         }
@@ -684,7 +645,6 @@
         }
     })();
 
-    // 🔥 添加全局函数，允许手动导出（如果脚本已运行过）
     window.exportXatuCourses = function() {
         try {
             const courses = JSON.parse(localStorage.getItem('xatu_courses') || '[]');
