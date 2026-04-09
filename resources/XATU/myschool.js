@@ -407,7 +407,7 @@
             teacherUnresolvedExpression: stats.teacherUnresolvedExpression
         });
 
-        return filterAndSplitSections(mergeContiguousSections(courses));
+        return mergeContiguousSections(courses);
     }
 
     // 从 TaskActivity 块前的代码中反解析教师真实姓名
@@ -435,57 +435,42 @@
     }
 
     // 合并同一课程的连续节次
-    function mergeContiguousSections(courses) {
-    const list = (courses || []).filter(
-        (c) => c && c.name && Number.isInteger(c.day) && Number.isInteger(c.startSection)
-    );
-    // 按课名/天/周/起止节排序
+function mergeContiguousSections(courses) {
+    const list = (courses || [])
+        .filter((c) => c && c.name && Number.isInteger(c.day) && Number.isInteger(c.startSection) && Number.isInteger(c.endSection))
+        .map((c) => ({
+            ...c,
+            weeks: normalizeWeeks(c.weeks)
+        }));
+
     list.sort((a, b) => {
-        const aKey = `${a.name}|${a.day}|${a.weeks.join(",")}`;
-        const bKey = `${b.name}|${b.day}|${b.weeks.join(",")}`;
-        if (aKey < bKey) return -1;
-        if (aKey > bKey) return 1;
+        const ak = `${a.name}|${a.teacher}|${a.position}|${a.day}|${a.weeks.join(",")}`;
+        const bk = `${b.name}|${b.teacher}|${b.position}|${b.day}|${b.weeks.join(",")}`;
+        if (ak < bk) return -1;
+        if (ak > bk) return 1;
         return a.startSection - b.startSection;
     });
+
     const merged = [];
     for (const item of list) {
         const prev = merged[merged.length - 1];
         const canMerge = prev
             && prev.name === item.name
+            && prev.teacher === item.teacher
+            && prev.position === item.position
             && prev.day === item.day
             && prev.weeks.join(",") === item.weeks.join(",")
-            && prev.endSection + 1 === item.startSection;
+            && prev.endSection + 1 === item.startSection;  // ✅ 改这里
+
         if (canMerge) {
-            prev.endSection = item.endSection;
+            prev.endSection = Math.max(prev.endSection, item.endSection);
         } else {
             merged.push({ ...item });
         }
     }
     return merged;
 }
-function filterAndSplitSections(courses) {
-    const result = [];
-    for (const c of courses) {
-        const len = c.endSection - c.startSection + 1;
-        if (len === 2 || len === 4) {
-            result.push({ ...c });
-        } else if (len > 4) {
-            for (let s = c.startSection; s + 1 <= c.endSection; s += 2) {
-                // 只保留满2节的段
-                if (s + 1 <= c.endSection) {
-                    result.push({
-                        ...c,
-                        startSection: s,
-                        endSection: s + 1
-                    });
-                }
-            }
-        }
-        // 单节不导出
-    }
-    return result;
-}
-    
+
     // 用你学校的真实作息时间替换原 getPresetTimeSlots
     function getPresetTimeSlots() {
         return [
