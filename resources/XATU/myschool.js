@@ -470,23 +470,24 @@
         }
         return merged;
     }
-     function splitLongBlocksToDoubleLessons(courses) {
+    function splitLongBlocksToDoubleLessons(courses) {
     const result = [];
     for (const c of courses) {
-        const len = c.endSection - c.startSection + 1;
-        if (len === 2 || len === 4) {
-            // 保留2节或4节的记录
-            result.push({ ...c });
-        } else if (len > 4) {
-            // 拆分成2节一组
-            for (let start = c.startSection; start + 1 <= c.endSection; start += 2) {
-                result.push({ ...c, startSection: start, endSection: start + 1 });
-            }
+        let s = c.startSection;
+        let e = c.endSection;
+        while (e - s + 1 >= 2) {
+            result.push({
+                ...c,
+                startSection: s,
+                endSection: s + 1
+            });
+            s += 2;
         }
-        // 单节(len==1)不导出
+        // 如果最后不足两节，则无视
     }
     return result;
 }
+
     // 用你学校的真实作息时间替换原 getPresetTimeSlots
     function getPresetTimeSlots() {
         return [
