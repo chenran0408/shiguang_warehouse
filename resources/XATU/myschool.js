@@ -400,13 +400,15 @@
             const weeks = normalizeWeeks(parseValidWeeksBitmap(weekBitmap));
             if (!name) continue;
 
+            // 默认让结束节次 = 开始节次 + 1 (即连上两节)
+            let endSec = section + 1;
             courses.push({
                 name,
                 teacher,
                 position,
                 day,
                 startSection: section,
-                endSection: section,
+                endSection: endSec,
                 weeks
             });
         }
