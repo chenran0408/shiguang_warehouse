@@ -407,7 +407,7 @@
             teacherUnresolvedExpression: stats.teacherUnresolvedExpression
         });
 
-        return splitLongBlocksToDoubleLessons(mergeContiguousSections(courses));
+        return filterAndSplitSections(mergeContiguousSections(courses));
     }
 
     // 从 TaskActivity 块前的代码中反解析教师真实姓名
@@ -470,20 +470,28 @@
         }
         return merged;
     }
-    function splitLongBlocksToDoubleLessons(courses) {
+
+    function filterAndSplitSections(courses) {
     const result = [];
     for (const c of courses) {
-        let s = c.startSection;
-        let e = c.endSection;
-        while (e - s + 1 >= 2) {
-            result.push({
-                ...c,
-                startSection: s,
-                endSection: s + 1
-            });
-            s += 2;
+        const len = c.endSection - c.startSection + 1;
+        // 保留2节或4节（不导出单节和乱的分段）
+        if (len === 2 || len === 4) {
+            result.push({ ...c });
+        } else if (len > 4) {
+            // 比如5-10，拆分成2-2一组
+            for (let s = c.startSection; s + 1 <= c.endSection; s += 2) {
+                // 只保留凑齐2节的段落，剩下的忽略
+                if (s + 1 <= c.endSection) {
+                    result.push({
+                        ...c,
+                        startSection: s,
+                        endSection: s + 1
+                    });
+                }
+            }
         }
-        // 如果最后不足两节，则无视
+        // 忽略单节
     }
     return result;
 }
@@ -506,7 +514,7 @@
         ];
     }
 
-    // 导出纯净JSON文件函数（适配课程表App）
+    // 🔥 新增：导出纯净JSON文件函数（适配课程表App）
     function exportCleanJson(courses, timeSlots) {
         const cleanExportData = {
             courses: courses,
@@ -523,8 +531,8 @@
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
 
-        console.log(`成功导出纯净JSON文件，包含 ${courses.length} 门课程`);
-        console.log('该文件可直接用于【课程文件导入】→【导入 json 文件】');
+        console.log(`✅ 成功导出纯净JSON文件，包含 ${courses.length} 门课程`);
+        console.log('📌 该文件可直接用于【课程文件导入】→【导入 json 文件】');
     }
 
     async function runImportFlow() {
