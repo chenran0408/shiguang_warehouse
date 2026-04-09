@@ -470,26 +470,20 @@
         }
         return merged;
     }
-    function splitLongBlocksToDoubleLessons(courses) {
+     function splitLongBlocksToDoubleLessons(courses) {
     const result = [];
     for (const c of courses) {
         const len = c.endSection - c.startSection + 1;
-        if (len === 4) {
-            // 拆为前2节
-            result.push({
-                ...c,
-                startSection: c.startSection,
-                endSection: c.startSection + 1,
-            });
-            // 后2节
-            result.push({
-                ...c,
-                startSection: c.startSection + 2,
-                endSection: c.endSection,
-            });
-        } else {
+        if (len === 2 || len === 4) {
+            // 保留2节或4节的记录
             result.push({ ...c });
+        } else if (len > 4) {
+            // 拆分成2节一组
+            for (let start = c.startSection; start + 1 <= c.endSection; start += 2) {
+                result.push({ ...c, startSection: start, endSection: start + 1 });
+            }
         }
+        // 单节(len==1)不导出
     }
     return result;
 }
