@@ -250,44 +250,45 @@
         return list;
     }
 
-    // 节次编号顺序一一对应，无需特殊映射
+    // 将教务系统的节次映射到 TimeSlots 编号
+    // 教务系统返回的节次顺序: 1-6为正常排列，7为午间课，8为晚间课
+    // TimeSlots 的顺序: 完全按时间排列，3为午间课，6为晚间课
     function mapSectionToTimeSlotNumber(section) {
-        return section;
+        const mapping = {
+            1: 1,
+            2: 2,
+            3: 4,
+            4: 5,
+            5: 7,
+            6: 8,
+            7: 3,
+            8: 6
+        };
+        return mapping[section] || section;
     }
 
     // 反引号化 JavaScript 字面量字符串，处理转义字符
     function unquoteJsLiteral(token) {
-  const text = String(token || "").trim();
-  if (!text || text === "null" || text === "undefined") return "";
+        const text = String(token || "").trim();
+        if (!text) return "";
+        if (text === "null" || text === "undefined") return "";
 
-  // 处理常见的转义引号
-  if ((text.startsWith('"') && text.endsWith('"')) || 
-      (text.startsWith("'") && text.endsWith("'"))) {
-    let inner = text.slice(1, -1);
-    
-    // ⬇️ 新增：处理 Unicode 转义字符 (这是树维系统最常见的坑)
-    inner = inner.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => 
-      String.fromCharCode(parseInt(hex, 16))
-    );
-    
-    // ⬇️ 新增：处理常见的十六进制转义
-    inner = inner.replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => 
-      String.fromCharCode(parseInt(hex, 16))
-    );
+        if ((text.startsWith("\"") && text.endsWith("\"")) || (text.startsWith("'") && text.endsWith("'"))) {
+            const quote = text[0];
+            let inner = text.slice(1, -1);
 
-    // 处理常见的反斜杠转义
-    inner = inner
-      .replace(/\\\\/g, "\\")   // 双反斜杠变单反斜杠
-      .replace(/\\"/g, '"')     // 转义引号变正常引号
-      .replace(/\\'/g, "'")
-      .replace(/\\n/g, "\n")
-      .replace(/\\r/g, "\r")
-      .replace(/\\t/g, "\t");
-      
-    return inner;
-  }
-  return text;
-}
+            inner = inner
+                .replace(/\\\\/g, "\\")
+                .replace(new RegExp(`\\\\${quote}`, "g"), quote)
+                .replace(/\\n/g, "\n")
+                .replace(/\\r/g, "\r")
+                .replace(/\\t/g, "\t");
+
+            return inner;
+        }
+
+        return text;
+    }
 
     // 分割 JavaScript 函数参数字符串，正确处理引号和转义
     function splitJsArgs(argsText) {
@@ -341,11 +342,21 @@
 
     /**
      * 从课表响应的 JavaScript 脚本中解析课程（树维教务核心解析逻辑）
+     *
+     * 树维系统返回的 HTML 中，表格单元格是空的，真正的课程数据在 <script> 中：
+     * var unitCount = 8;  // 每天的节次数
+     * activity = new TaskActivity(teacherId, teacherName, courseId, courseName, ...);
+     * index = day * unitCount + section;  // 计算课程在二维表格中的位置
+     * table0.activities[index] = activity;
+     *
+     * @param {string} htmlText - 课表响应的完整 HTML
+     * @returns {Array} 课程数组
      */
     function parseCoursesFromTaskActivityScript(htmlText) {
         const text = String(htmlText || "");
         if (!text) return [];
 
+        // 提取 unitCount（每天的节次数，通常为 8）
         const unitCountMatch = text.match(/\bvar\s+unitCount\s*=\s*(\d+)\s*;/);
         const unitCount = unitCountMatch ? parseInt(unitCountMatch[1], 10) : 0;
         if (!Number.isInteger(unitCount) || unitCount <= 0) return [];
@@ -356,7 +367,8 @@
             teacherRecovered: 0,
             teacherUnresolvedExpression: 0
         };
-
+        // 匹配所有 TaskActivity 构造调用块
+        // TaskActivity 参数顺序: teacherId, teacherName, courseId, courseName, classId, room, weekBitmap, ...
         const blockRe = /activity\s*=\s*new\s+TaskActivity\(([^]*?)\)\s*;\s*index\s*=\s*(?:(\d+)\s*\*\s*unitCount\s*\+\s*(\d+)|(\d+))\s*;\s*table\d+\.activities\[index\]/g;
         let match;
 
@@ -366,6 +378,7 @@
             const args = splitJsArgs(argsText);
             if (args.length < 7) continue;
 
+            // 解析 index 计算表达式，确定星期几和第几节
             const dayPart = match[2];
             const sectionPart = match[3];
             const directIndexPart = match[4];
@@ -379,12 +392,16 @@
 
             if (!Number.isInteger(indexValue) || indexValue < 0) continue;
 
+            // 从线性索引反推星期和节次
             const day = Math.floor(indexValue / unitCount) + 1;
             let section = (indexValue % unitCount) + 1;
+            // 将教务系统的节次映射到 TimeSlots 编号
             section = mapSectionToTimeSlotNumber(section);
             if (day < 1 || day > 7 || section < 1 || section > 16) continue;
 
+            // 提取课程字段：教师(args[1])、课程名(args[3])、教室(args[5])、周次位图(args[6])
             let teacher = unquoteJsLiteral(args[1]);
+            // 如果教师名是表达式（如 actTeacherName.join(',')），反向解析真实姓名
             if (teacher && !/^['"]/.test(String(args[1]).trim()) && /join\s*\(/.test(String(args[1]))) {
                 const resolved = resolveTeachersForTaskActivityBlock(text, match.index);
                 if (resolved) {
@@ -398,17 +415,16 @@
             const position = unquoteJsLiteral(args[5]);
             const weekBitmap = unquoteJsLiteral(args[6]);
             const weeks = normalizeWeeks(parseValidWeeksBitmap(weekBitmap));
+
             if (!name) continue;
 
-            // 默认让结束节次 = 开始节次 + 1 (即连上两节)
-            let endSec = section + 1;
             courses.push({
                 name,
                 teacher,
                 position,
                 day,
                 startSection: section,
-                endSection: endSec,
+                endSection: section+1,
                 weeks
             });
         }
@@ -424,7 +440,9 @@
     }
 
     // 从 TaskActivity 块前的代码中反解析教师真实姓名
+    // 树维系统会先定义 var actTeachers = [{id:123, name:"张三"}]，再用 actTeacherName.join(',') 传参
     function resolveTeachersForTaskActivityBlock(fullText, blockStartIndex) {
+        // 向前搜索最近的 actTeachers 变量定义（一般在前 2000 字符内）
         const start = Math.max(0, blockStartIndex - 2200);
         const segment = fullText.slice(start, blockStartIndex);
         const re = /var\s+actTeachers\s*=\s*\[([^]*?)\]\s*;/g;
@@ -447,98 +465,64 @@
         return Array.from(new Set(names)).join(",");
     }
 
- // 合并同一课程的连续节次
-function mergeContiguousSections(courses) {
-    // 1. 数据预处理与清洗
-    const list = (courses || [])
-        .filter((c) => c && c.name && Number.isInteger(c.day) && Number.isInteger(c.startSection))
-        .map((c) => ({
-            ...c,
-            weeks: normalizeWeeks(c.weeks),
-            // 👇 新增：创建一个清洗后的地点字段，用于后续比较
-            // 去除首尾空格，并将中间的连续空白（包括换行）替换为无，确保 "A101" 和 "A101\n" 被视为相同
-            _cleanPos: String(c.position || "").trim().replace(/\s+/g, "") 
-        }));
+    // 合并同一课程的连续节次
+    function mergeContiguousSections(courses) {
+        const list = (courses || [])
+            .filter((c) => c && c.name && Number.isInteger(c.day) && Number.isInteger(c.startSection) && Number.isInteger(c.endSection))
+            .map((c) => ({
+                ...c,
+                weeks: normalizeWeeks(c.weeks)
+            }));
 
-    // 2. 排序
-    list.sort((a, b) => {
-        // 👇 修改：排序键也使用清洗后的地点 _cleanPos
-        const ak = `${a.name}|${a.teacher}|${a._cleanPos}|${a.day}|${a.weeks.join(",")}`;
-        const bk = `${b.name}|${b.teacher}|${b._cleanPos}|${b.day}|${b.weeks.join(",")}`;
-        if (ak < bk) return -1;
-        if (ak > bk) return 1;
-        return a.startSection - b.startSection;
-    });
+        list.sort((a, b) => {
+            const ak = `${a.name}|${a.teacher}|${a.position}|${a.day}|${a.weeks.join(",")}`;
+            const bk = `${b.name}|${b.teacher}|${b.position}|${b.day}|${b.weeks.join(",")}`;
+            if (ak < bk) return -1;
+            if (ak > bk) return 1;
+            return a.startSection - b.startSection;
+        });
 
-    // 3. 合并逻辑
-    const merged = [];
-    for (const item of list) {
-        const prev = merged[merged.length - 1];
-        
-        // 👇 修改：比较时使用 _cleanPos 而不是原始的 position
-        const canMerge = prev
-            && prev.name === item.name
-            && prev.teacher === item.teacher
-            && prev._cleanPos === item._cleanPos  // ✅ 关键修复：使用清洗后的地点比较
-            && prev.day === item.day
-            && prev.weeks.join(",") === item.weeks.join(",")
-            && prev.endSection + 1 === item.startSection; // 确保节次连续 (如 1+1=2)
+        const merged = [];
+        for (const item of list) {
+            const prev = merged[merged.length - 1];
+            const canMerge = prev
+                && prev.name === item.name
+                && prev.teacher === item.teacher
+                && prev.position === item.position
+                && prev.day === item.day
+                && prev.weeks.join(",") === item.weeks.join(",")
+                && prev.endSection + 1 >= item.startSection;
 
-        if (canMerge) {
-            prev.endSection = Math.max(prev.endSection, item.endSection);
-        } else {
-            merged.push({ ...item });
+            if (canMerge) {
+                prev.endSection = Math.max(prev.endSection, item.endSection);
+            } else {
+                merged.push({ ...item });
+            }
         }
+        return merged;
     }
-    
-    // 4. 清理临时字段并返回
-    return merged.map(({ _cleanPos, ...rest }) => rest);
-}
 
-    // 用你学校的真实作息时间替换原 getPresetTimeSlots
     function getPresetTimeSlots() {
         return [
-            { number: 1,  startTime: "08:20", endTime: "09:05" },
-            { number: 2,  startTime: "09:15", endTime: "10:00" },
-            { number: 3,  startTime: "10:20", endTime: "11:05" },
-            { number: 4,  startTime: "11:15", endTime: "12:00" },
-            { number: 5,  startTime: "14:00", endTime: "14:45" },
-            { number: 6,  startTime: "14:55", endTime: "15:40" },
-            { number: 7,  startTime: "16:00", endTime: "16:45" },
-            { number: 8,  startTime: "16:55", endTime: "17:40" },
-            { number: 9,  startTime: "18:10", endTime: "18:55" },
-            { number: 10, startTime: "19:05", endTime: "19:50" },
-            { number: 11, startTime: "20:00", endTime: "20:45" },
-            { number: 12, startTime: "20:55", endTime: "21:40" }
+            { number: 1, startTime: "08:00", endTime: "09:35" },
+            { number: 2, startTime: "10:05", endTime: "11:40" },
+            { number: 3, startTime: "12:00", endTime: "13:35" }, // 午间课
+            { number: 4, startTime: "14:00", endTime: "15:35" },
+            { number: 5, startTime: "16:05", endTime: "17:40" },
+            { number: 6, startTime: "17:45", endTime: "18:30" }, // 晚间课，部分课程为 18:00-18:45
+            { number: 7, startTime: "19:00", endTime: "20:35" },
+            { number: 8, startTime: "20:45", endTime: "22:20" }
         ];
     }
 
-    // 🔥 新增：导出纯净JSON文件函数（适配课程表App）
-    function exportCleanJson(courses, timeSlots) {
-        const cleanExportData = {
-            courses: courses,
-            timeSlots: timeSlots
-        };
-        const jsonString = JSON.stringify(cleanExportData, null, 2);
-        const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `xatu_courses_clean_${new Date().toISOString().slice(0, 10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        console.log(`✅ 成功导出纯净JSON文件，包含 ${courses.length} 门课程`);
-        console.log('📌 该文件可直接用于【课程文件导入】→【导入 json 文件】');
-    }
+    
 
     async function runImportFlow() {
         ensureBridgePromise();
         recordDiag("start", `base=${BASE}`);
         safeToast("开始自动探测西安工业大学教务参数...");
 
+        // 1) 探测学生 ID（ids）和学期选择组件 ID（tagId）
         recordDiag("detect_params", "request entry page");
         const entryUrl = `${BASE}/eams/courseTableForStd.action?&sf_request_type=ajax`;
         const entryHtml = await requestText(entryUrl, {
@@ -557,6 +541,7 @@ function mergeContiguousSections(courses) {
             return;
         }
 
+        // 2) 获取学期列表并让用户选择（最近 8 个）
         recordDiag("load_semesters", "request semester list");
         const semesterRaw = await requestText(`${BASE}/eams/dataQuery.action?sf_request_type=ajax`, {
             method: "POST",
@@ -589,6 +574,7 @@ function mergeContiguousSections(courses) {
         recordDiag("select_semester", `selected=${selectedSemester.id}`);
         safeToast("正在获取课表数据...");
 
+        // 3) 拉取选定学期的课表 HTML
         recordDiag("load_courses", "request course table html");
         const courseHtml = await requestText(`${BASE}/eams/courseTableForStd!courseTable.action?sf_request_type=ajax`, {
             method: "POST",
@@ -602,6 +588,7 @@ function mergeContiguousSections(courses) {
             ].join("&")
         });
 
+        // 4) 解析课表脚本
         const courses = parseCoursesFromTaskActivityScript(courseHtml);
         recordDiag("parse_courses", `count=${courses.length}`);
 
@@ -631,6 +618,7 @@ function mergeContiguousSections(courses) {
             return;
         }
 
+        // 🔥 获取预设时间段
         const timeSlots = getPresetTimeSlots();
 
         recordDiag("save_courses", `count=${courses.length}`);
@@ -639,12 +627,15 @@ function mergeContiguousSections(courses) {
             sample: courses.slice(0, 3)
         });
 
+        // 保存到应用
         await window.AndroidBridgePromise.saveImportedCourses(JSON.stringify(courses));
         await window.AndroidBridgePromise.savePresetTimeSlots(JSON.stringify(timeSlots));
 
+        // 🔥 同时保存到 localStorage（兼容原脚本）
         localStorage.setItem('xatu_courses', JSON.stringify(courses));
         localStorage.setItem('xatu_timeSlots', JSON.stringify(timeSlots));
-
+        
+        // 🔥 自动弹窗询问是否导出纯净JSON文件
         if (confirm(`✅ 课程导入成功！\n共 ${courses.length} 门课程\n\n是否同时导出纯净JSON文件？\n（可用于备份或手动导入其他设备）`)) {
             exportCleanJson(courses, timeSlots);
         }
@@ -669,6 +660,7 @@ function mergeContiguousSections(courses) {
         }
     })();
 
+    // 🔥 添加全局函数，允许手动导出（如果脚本已运行过）
     window.exportXatuCourses = function() {
         try {
             const courses = JSON.parse(localStorage.getItem('xatu_courses') || '[]');
