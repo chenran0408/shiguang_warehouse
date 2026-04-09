@@ -257,26 +257,37 @@
 
     // 反引号化 JavaScript 字面量字符串，处理转义字符
     function unquoteJsLiteral(token) {
-        const text = String(token || "").trim();
-        if (!text) return "";
-        if (text === "null" || text === "undefined") return "";
+  const text = String(token || "").trim();
+  if (!text || text === "null" || text === "undefined") return "";
 
-        if ((text.startsWith("\"") && text.endsWith("\"")) || (text.startsWith("'") && text.endsWith("'"))) {
-            const quote = text[0];
-            let inner = text.slice(1, -1);
+  // 处理常见的转义引号
+  if ((text.startsWith('"') && text.endsWith('"')) || 
+      (text.startsWith("'") && text.endsWith("'"))) {
+    let inner = text.slice(1, -1);
+    
+    // ⬇️ 新增：处理 Unicode 转义字符 (这是树维系统最常见的坑)
+    inner = inner.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => 
+      String.fromCharCode(parseInt(hex, 16))
+    );
+    
+    // ⬇️ 新增：处理常见的十六进制转义
+    inner = inner.replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => 
+      String.fromCharCode(parseInt(hex, 16))
+    );
 
-            inner = inner
-                .replace(/\\\\/g, "\\")
-                .replace(new RegExp(`\\\\${quote}`, "g"), quote)
-                .replace(/\\n/g, "\n")
-                .replace(/\\r/g, "\r")
-                .replace(/\\t/g, "\t");
-
-            return inner;
-        }
-
-        return text;
-    }
+    // 处理常见的反斜杠转义
+    inner = inner
+      .replace(/\\\\/g, "\\")   // 双反斜杠变单反斜杠
+      .replace(/\\"/g, '"')     // 转义引号变正常引号
+      .replace(/\\'/g, "'")
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\r")
+      .replace(/\\t/g, "\t");
+      
+    return inner;
+  }
+  return text;
+}
 
     // 分割 JavaScript 函数参数字符串，正确处理引号和转义
     function splitJsArgs(argsText) {
@@ -434,33 +445,42 @@
         return Array.from(new Set(names)).join(",");
     }
 
-    // 合并同一课程的连续节次
+ // 合并同一课程的连续节次
 function mergeContiguousSections(courses) {
+    // 1. 数据预处理与清洗
     const list = (courses || [])
-        .filter((c) => c && c.name && Number.isInteger(c.day) && Number.isInteger(c.startSection) && Number.isInteger(c.endSection))
+        .filter((c) => c && c.name && Number.isInteger(c.day) && Number.isInteger(c.startSection))
         .map((c) => ({
             ...c,
-            weeks: normalizeWeeks(c.weeks)
+            weeks: normalizeWeeks(c.weeks),
+            // 👇 新增：创建一个清洗后的地点字段，用于后续比较
+            // 去除首尾空格，并将中间的连续空白（包括换行）替换为无，确保 "A101" 和 "A101\n" 被视为相同
+            _cleanPos: String(c.position || "").trim().replace(/\s+/g, "") 
         }));
 
+    // 2. 排序
     list.sort((a, b) => {
-        const ak = `${a.name}|${a.teacher}|${a.position}|${a.day}|${a.weeks.join(",")}`;
-        const bk = `${b.name}|${b.teacher}|${b.position}|${b.day}|${b.weeks.join(",")}`;
+        // 👇 修改：排序键也使用清洗后的地点 _cleanPos
+        const ak = `${a.name}|${a.teacher}|${a._cleanPos}|${a.day}|${a.weeks.join(",")}`;
+        const bk = `${b.name}|${b.teacher}|${b._cleanPos}|${b.day}|${b.weeks.join(",")}`;
         if (ak < bk) return -1;
         if (ak > bk) return 1;
         return a.startSection - b.startSection;
     });
 
+    // 3. 合并逻辑
     const merged = [];
     for (const item of list) {
         const prev = merged[merged.length - 1];
+        
+        // 👇 修改：比较时使用 _cleanPos 而不是原始的 position
         const canMerge = prev
             && prev.name === item.name
             && prev.teacher === item.teacher
-            && prev.position === item.position
+            && prev._cleanPos === item._cleanPos  // ✅ 关键修复：使用清洗后的地点比较
             && prev.day === item.day
             && prev.weeks.join(",") === item.weeks.join(",")
-            && prev.endSection + 1 === item.startSection;  // ✅ 改这里
+            && prev.endSection + 1 === item.startSection; // 确保节次连续 (如 1+1=2)
 
         if (canMerge) {
             prev.endSection = Math.max(prev.endSection, item.endSection);
@@ -468,7 +488,9 @@ function mergeContiguousSections(courses) {
             merged.push({ ...item });
         }
     }
-    return merged;
+    
+    // 4. 清理临时字段并返回
+    return merged.map(({ _cleanPos, ...rest }) => rest);
 }
 
     // 用你学校的真实作息时间替换原 getPresetTimeSlots
