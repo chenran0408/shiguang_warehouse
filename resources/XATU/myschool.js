@@ -407,7 +407,7 @@
             teacherUnresolvedExpression: stats.teacherUnresolvedExpression
         });
 
-        return filterAndSplitSections(mergeContiguousSections(courses));
+        return mergeContiguousSections(courses);
     }
 
     // 从 TaskActivity 块前的代码中反解析教师真实姓名
@@ -470,31 +470,6 @@
         }
         return merged;
     }
-
-    function filterAndSplitSections(courses) {
-    const result = [];
-    for (const c of courses) {
-        const len = c.endSection - c.startSection + 1;
-        // 保留2节或4节（不导出单节和乱的分段）
-        if (len === 2 || len === 4) {
-            result.push({ ...c });
-        } else if (len > 4) {
-            // 比如5-10，拆分成2-2一组
-            for (let s = c.startSection; s + 1 <= c.endSection; s += 2) {
-                // 只保留凑齐2节的段落，剩下的忽略
-                if (s + 1 <= c.endSection) {
-                    result.push({
-                        ...c,
-                        startSection: s,
-                        endSection: s + 1
-                    });
-                }
-            }
-        }
-        // 忽略单节
-    }
-    return result;
-}
 
     // 用你学校的真实作息时间替换原 getPresetTimeSlots
     function getPresetTimeSlots() {
