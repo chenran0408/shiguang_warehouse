@@ -381,3 +381,8 @@ schools:
     name: "山东师范大学"
     initial: "S"
     resource_folder: "SDNU"
+
+  - id: "XATU"
+    name: "西安工业大学"
+    initial: "X"
+    resource_folder: "XATU"
