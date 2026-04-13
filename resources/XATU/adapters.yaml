@@ -4,5 +4,5 @@ adapters:
     category: "BACHELOR_AND_ASSOCIATE"
     asset_js_path: "myschool.js"
     import_url: "http://jwgl2018.xatu.edu.cn"
-    maintainer: "你名字"
+    maintainer: "晨熯"
     description: "树维教务系统适配"
