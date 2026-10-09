@@ -5,7 +5,7 @@
 function powerSplit(paramsRaw) {
     const args = [];
     let current = "";
-    let depth = 0; 
+    let depth = 0;
     let inQuote = false;
     let quoteChar = "";
 
@@ -26,7 +26,7 @@ function powerSplit(paramsRaw) {
             current += char;
         }
     }
-    args.push(cleanArg(current)); 
+    args.push(cleanArg(current));
     return args;
 }
 
@@ -75,7 +75,7 @@ function mergeContinuousLessons(lessons) {
     for (const key in groups) {
         const group = groups[key];
         const matrix = group.weeksMatrix;
-        
+
         // 用于记录相同的“连续节次块”分布在哪些周次
         // 例如 blockMap["1-2"] = [1, 2, 3, 4, 5, 6, 7, 8, 9]
         // 例如 blockMap["2-2"] = [10]
@@ -98,7 +98,7 @@ function mergeContinuousLessons(lessons) {
                     const blockKey = `${start}-${prev}`;
                     if (!blockMap[blockKey]) blockMap[blockKey] = [];
                     blockMap[blockKey].push(w);
-                    
+
                     // 开启新块
                     start = curr;
                     prev = curr;
@@ -157,7 +157,7 @@ function parseTaskActivities(html) {
         const courseName = (args[3] || "未知课程").split('(')[0];
         const position = (args[5] || "未知地点").replace(/\(.*?\)/g, "");
         const weeksBitmap = args[6] || "";
-        
+
         const weeks = [];
         for (let j = 0; j < weeksBitmap.length; j++) {
             if (weeksBitmap[j] === '1') weeks.push(j);
@@ -169,7 +169,7 @@ function parseTaskActivities(html) {
         const idxRegex = /index\s*=\s*(\d+)\s*\*\s*unitCount\s*\+\s*(\d+);/g;
         let m;
         while ((m = idxRegex.exec(block)) !== null) {
-            const day = parseInt(m[1]) + 1; 
+            const day = parseInt(m[1]) + 1;
             const section = parseInt(m[2]) + 1;
 
             rawResults.push({
@@ -285,15 +285,15 @@ async function fetchAndParseCourses(semesterId, ids) {
 
 async function applyTimeSlots() {
     const slots = [
-        { "number": 1, "startTime": "08:20", "endTime": "09:05" }, 
+        { "number": 1, "startTime": "08:20", "endTime": "09:05" },
         { "number": 2, "startTime": "09:15", "endTime": "10:00" },
         { "number": 3, "startTime": "10:20", "endTime": "11:05" },
         { "number": 4, "startTime": "11:15", "endTime": "12:00" },
         { "number": 5, "startTime": "14:00", "endTime": "14:45" },
         { "number": 6, "startTime": "14:55", "endTime": "15:40" },
-        { "number": 7, "startTime": "16:00", "endTime": "16:45" }, 
+        { "number": 7, "startTime": "16:00", "endTime": "16:45" },
         { "number": 8, "startTime": "16:55", "endTime": "17:40" },
-        { "number": 9, "startTime": "18:10", "endTime": "18:55" }, 
+        { "number": 9, "startTime": "18:10", "endTime": "18:55" },
         { "number": 10, "startTime": "19:05", "endTime": "19:50" },
         { "number": 11, "startTime": "20:00", "endTime": "20:45" },
         { "number": 12, "startTime": "20:55", "endTime": "21:40" },
@@ -305,8 +305,8 @@ async function applyTimeSlots() {
 function adjustTeachingBuilding3Courses(courses) {
     return courses.map(course => {
         // 检查是否是教3楼且正好是第3-4节两节课
-        if (course.isTeachingBuilding3 && 
-            course.startSection === 3 && 
+        if (course.isTeachingBuilding3 &&
+            course.startSection === 3 &&
             course.endSection === 4) {
             // 设置为自定义时间模式
             course.isCustomTime = true;
@@ -324,11 +324,11 @@ async function runImportFlow() {
         if (!params) throw new Error("未能识别教务参数，请确认已登录");
 
         const semester = await getSelectedSemester(params.tagId);
-        if (!semester) return; 
+        if (!semester) return;
 
         window.shiguangBridge.showToast("正在同步课表...");
         let courses = await fetchAndParseCourses(semester.id, params.ids);
-        
+
         if (!courses || courses.length === 0) throw new Error("未解析到课程数据");
 
         // 调整教3楼课程时间
@@ -341,7 +341,7 @@ async function runImportFlow() {
             window.shiguangBridge.showToast(`已推算第一教学周周一为 ${config.semesterStartDate}`);
         }
         const saveResult = await window.shiguangBridgePromise.saveImportedCourses(JSON.stringify(courses));
-        
+
         if (saveResult) {
             window.shiguangBridge.showToast(`成功导入 ${courses.length} 个课程条目`);
             window.shiguangBridge.notifyTaskCompletion();
