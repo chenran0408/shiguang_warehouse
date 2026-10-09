@@ -189,10 +189,61 @@ function parseTaskActivities(html) {
     return mergeContinuousLessons(rawResults);
 }
 
-async function request(url, options = {}) {
+async function requestResponse(url, options = {}) {
     const res = await fetch(url, { credentials: "include", ...options });
     if (!res.ok) throw new Error(`网络请求失败: ${res.status}`);
-    return await res.text();
+    return res;
+}
+
+async function request(url, options = {}) {
+    return await (await requestResponse(url, options)).text();
+}
+
+/** 根据教务首页的当前教学周，推算第一教学周的周一（北京时间）。 */
+function inferCurrentSemester(html, referenceTime) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const label = Array.from(doc.querySelectorAll("strong"))
+        .find(el => el.textContent.trim() === "当前教学周");
+    const weekText = label?.parentElement?.querySelector("span")?.textContent.trim();
+    const totalMatch = label?.parentElement?.querySelector("i")?.textContent.match(/\/\s*(\d+)/);
+    if (!weekText || !/^\d+$/.test(weekText) || !totalMatch) return null;
+
+    const week = Number(weekText);
+    const totalWeeks = Number(totalMatch[1]);
+    if (week < 1 || week > totalWeeks || totalWeeks > 53 || !Number.isFinite(referenceTime)) return null;
+
+    // 用 UTC 方法处理已平移到北京时间的日期，避免设备时区和夏令时影响。
+    const start = new Date(referenceTime + 8 * 60 * 60 * 1000);
+    start.setUTCHours(0, 0, 0, 0);
+    const daysSinceMonday = (start.getUTCDay() + 6) % 7;
+    start.setUTCDate(start.getUTCDate() - daysSinceMonday - (week - 1) * 7);
+
+    // 学期选择器没有起止日期；按推算出的起始月份识别本校的秋季/春季学期。
+    const isAutumn = start.getUTCMonth() >= 6;
+    const schoolYearStart = start.getUTCFullYear() - (isAutumn ? 0 : 1);
+    return {
+        schoolYear: `${schoolYearStart}-${schoolYearStart + 1}`,
+        term: isAutumn ? "1" : "2",
+        semesterStartDate: start.toISOString().slice(0, 10)
+    };
+}
+
+async function getCurrentSemesterConfig(semester) {
+    try {
+        const res = await requestResponse("http://jwgl2018.xatu.edu.cn/eams/homeExt!main.action?sf_request_type=ajax");
+        const serverTime = Date.parse(res.headers.get("Date") || "");
+        const current = inferCurrentSemester(await res.text(), Number.isFinite(serverTime) ? serverTime : Date.now());
+        if (!current) throw new Error("未能识别当前教学周");
+        if (semester.schoolYear !== current.schoolYear || semester.term !== current.term) {
+            window.shiguangBridge.showToast("历史或其他学期开学日期请手动设置");
+            return null;
+        }
+        return { semesterStartDate: current.semesterStartDate };
+    } catch (e) {
+        console.warn(`[开学日期推算] ${e.message}`);
+        window.shiguangBridge.showToast("无法推算开学日期，请在导入后手动设置");
+        return null;
+    }
 }
 
 async function detectParameters() {
@@ -212,7 +263,12 @@ async function getSelectedSemester(tagId) {
     const data = Function(`return (${raw});`)();
     const list = [];
     for (let key in data.semesters) {
-        data.semesters[key].forEach(s => list.push({ id: s.id, name: `${s.schoolYear} ${s.name}学期` }));
+        data.semesters[key].forEach(s => list.push({
+            id: s.id,
+            schoolYear: s.schoolYear,
+            term: String(s.name),
+            name: `${s.schoolYear} ${s.name}学期`
+        }));
     }
     const idx = await window.shiguangBridgePromise.showSingleSelection("选择学期", JSON.stringify(list.map(s => s.name)), -1);
     return idx !== null ? list[idx] : null;
@@ -278,7 +334,12 @@ async function runImportFlow() {
         // 调整教3楼课程时间
         courses = adjustTeachingBuilding3Courses(courses);
 
+        const config = await getCurrentSemesterConfig(semester);
         await applyTimeSlots();
+        if (config) {
+            await window.shiguangBridgePromise.saveCourseConfig(JSON.stringify(config));
+            window.shiguangBridge.showToast(`已推算第一教学周周一为 ${config.semesterStartDate}`);
+        }
         const saveResult = await window.shiguangBridgePromise.saveImportedCourses(JSON.stringify(courses));
         
         if (saveResult) {
