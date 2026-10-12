@@ -169,6 +169,10 @@ function parseCourseCredits(html) {
     return credits;
 }
 
+function formatCourseName(name, courseSequence) {
+    return courseSequence ? `${name} | ${courseSequence}` : name;
+}
+
 function parseTaskActivities(html) {
     const credits = parseCourseCredits(html);
     const rawResults = [];
@@ -205,7 +209,7 @@ function parseTaskActivities(html) {
             const section = parseInt(m[2]) + 1;
 
             rawResults.push({
-                "name": courseName,
+                "name": formatCourseName(courseName, courseSequence),
                 "courseSequence": courseSequence,
                 ...(credit !== undefined ? { credit } : {}),
                 "teacher": teacherName,
@@ -355,7 +359,7 @@ function parseExamCourses(html, config) {
             if (seen.has(key)) continue;
             seen.add(key);
             exams.push({
-                name: `【考试】${name}`,
+                name: formatCourseName(`【考试】${name}`, get(row, "课程序号")),
                 teacher: "",
                 position,
                 day: date.getUTCDay() || 7,
