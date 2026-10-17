@@ -219,7 +219,7 @@ async function getSelectedSemester({ tagId }, current) {
         `tagId=${encodeURIComponent(tagId)}&dataType=semesterCalendar`);
     const data = Function(`return (${html});`)();
     const list = Object.values(data.semesters).flat().map(s => ({
-        id: s.id, name: `${s.schoolYear} ${s.name}学期`,
+        id: s.id, name: `${s.schoolYear}学年 ${String(s.name) === "1" ? "秋季" : "春季"}学期`,
         isCurrent: s.schoolYear === current?.schoolYear && String(s.name) === current?.term
     }));
     const currentIndex = list.findIndex(s => s.isCurrent);
