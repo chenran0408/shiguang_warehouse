@@ -267,12 +267,14 @@ async function runImportFlow() {
             semesterTotalWeeks: current.semesterTotalWeeks
         } : null;
         if (current && !semester.isCurrent) window.shiguangBridge.showToast("历史或其他学期开学日期请手动设置");
-        if (!await applyTimeSlots()) throw new Error("作息时间保存失败，导入未完成");
+        if (!await applyTimeSlots()) {
+            console.error("作息时间保存失败，导入未完成");
+            return;
+        }
         if (config) {
             if (!await window.shiguangBridgePromise.saveCourseConfig(JSON.stringify(config))) {
                 throw new Error("学期配置保存失败，导入未完成");
             }
-            window.shiguangBridge.showToast(`已推算第一教学周周一为 ${config.semesterStartDate}`);
         }
         if (!await window.shiguangBridgePromise.saveImportedCourses(JSON.stringify(courses))) {
             throw new Error("课程保存失败，导入未完成");
