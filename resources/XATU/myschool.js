@@ -178,11 +178,10 @@ function inferCurrentSemester(html, referenceTime) {
     const totalWeeks = Number(totalMatch[1]);
     if (week < 1 || week > totalWeeks || totalWeeks > 53 || !Number.isFinite(referenceTime)) return null;
 
-    // 用 UTC 方法处理已平移到北京时间的日期，避免设备时区和夏令时影响。
-    const start = new Date(referenceTime + 8 * 60 * 60 * 1000);
+    // 固定按教务的 UTC+8 日期计算第一周周一。
+    const start = new Date(referenceTime + 8 * 3600000);
     start.setUTCHours(0, 0, 0, 0);
-    const daysSinceMonday = (start.getUTCDay() + 6) % 7;
-    start.setUTCDate(start.getUTCDate() - daysSinceMonday - (week - 1) * 7);
+    start.setUTCDate(start.getUTCDate() - (start.getUTCDay() + 6) % 7 - (week - 1) * 7);
 
     const isAutumn = start.getUTCMonth() >= 6;
     const year = start.getUTCFullYear() - (isAutumn ? 0 : 1);
