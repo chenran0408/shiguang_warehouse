@@ -36,110 +36,43 @@ function cleanArg(s) {
     return s.replace(/^["']|["']$/g, "");
 }
 
-/**
- * 全局课程合并逻辑
- */
+/** 按课程、教师、地点和星期合并连续节次，保持原有50周范围。 */
 function mergeContinuousLessons(lessons) {
-    if (!lessons || lessons.length === 0) return [];
-
-    // 1. 建立基于 (课程名|教师|地点|星期几) 的分组
-    const groups = {};
-    lessons.forEach(l => {
-        const key = `${l.courseSequence || ""}|${l.name}|${l.teacher}|${l.position}|${l.day}`;
-        if (!groups[key]) {
-            groups[key] = {
-                name: l.name,
-                teacher: l.teacher,
-                position: l.position,
-                day: l.day,
-                isTeachingBuilding3: l.isTeachingBuilding3,
-                credit: l.credit,
-                // 假设大学最多 50 周，构建一个：第 N 周对应哪些节次的矩阵
-                weeksMatrix: Array.from({ length: 50 }, () => new Set())
-            };
+    const groups = new Map();
+    for (const lesson of lessons) {
+        const key = JSON.stringify([lesson.courseSequence, lesson.name, lesson.teacher, lesson.position, lesson.day]);
+        if (!groups.has(key)) groups.set(key, { lesson, weeks: Array.from({ length: 50 }, () => new Set()) });
+        const { weeks } = groups.get(key);
+        for (const week of lesson.weeks) {
+            if (week < 0 || week >= 50) continue;
+            for (let section = lesson.startSection; section <= lesson.endSection; section++) weeks[week].add(section);
         }
-        // 将系统传来的凌乱数据彻底打散，按“周”填入对应的“节”中，Set自动去重
-        if (l.weeks && Array.isArray(l.weeks)) {
-            l.weeks.forEach(w => {
-                if (w >= 0 && w < 50) {
-                    for (let s = l.startSection; s <= l.endSection; s++) {
-                        groups[key].weeksMatrix[w].add(s);
-                    }
-                }
-            });
-        }
-    });
-
-    const merged = [];
-
-    // 2. 根据矩阵重新组装绝对精确的课程块
-    for (const key in groups) {
-        const group = groups[key];
-        const matrix = group.weeksMatrix;
-
-        // 用于记录相同的“连续节次块”分布在哪些周次
-        // 例如 blockMap["1-2"] = [1, 2, 3, 4, 5, 6, 7, 8, 9]
-        // 例如 blockMap["2-2"] = [10]
-        const blockMap = {};
-
-        for (let w = 0; w < matrix.length; w++) {
-            const sections = Array.from(matrix[w]).sort((a, b) => a - b);
-            if (sections.length === 0) continue;
-
-            // 寻找当前周的连续节次块
-            let start = sections[0];
-            let prev = sections[0];
-
-            for (let i = 1; i < sections.length; i++) {
-                const curr = sections[i];
-                if (curr === prev + 1) {
-                    prev = curr; // 节次连续，继续延伸
-                } else {
-                    // 节次断开，结算上一个块
-                    const blockKey = `${start}-${prev}`;
-                    if (!blockMap[blockKey]) blockMap[blockKey] = [];
-                    blockMap[blockKey].push(w);
-
-                    // 开启新块
-                    start = curr;
-                    prev = curr;
-                }
+    }
+    const courses = [];
+    for (const { lesson, weeks } of groups.values()) {
+        const blocks = new Map();
+        weeks.forEach((sections, week) => {
+            const sorted = [...sections].sort((a, b) => a - b);
+            for (let i = 0; i < sorted.length; i++) {
+                const start = sorted[i];
+                while (i + 1 < sorted.length && sorted[i + 1] === sorted[i] + 1) i++;
+                const key = `${start}-${sorted[i]}`;
+                if (!blocks.has(key)) blocks.set(key, []);
+                blocks.get(key).push(week);
             }
-            // 结算每周最后一个块
-            const blockKey = `${start}-${prev}`;
-            if (!blockMap[blockKey]) blockMap[blockKey] = [];
-            blockMap[blockKey].push(w);
-        }
-
-        // 3. 将聚合好的 blockMap 转换为最终的 JSON 对象
-        for (const blockKey in blockMap) {
-            const [startSec, endSec] = blockKey.split('-').map(Number);
-            merged.push({
-                name: group.name,
-                teacher: group.teacher,
-                position: group.position,
-                day: group.day,
-                startSection: startSec,
-                endSection: endSec,
-                weeks: blockMap[blockKey],
-                isTeachingBuilding3: group.isTeachingBuilding3,
-                ...(group.credit !== undefined ? { credit: group.credit } : {})
+        });
+        for (const [key, courseWeeks] of blocks) {
+            const [startSection, endSection] = key.split('-').map(Number);
+            courses.push({
+                name: formatCourseName(lesson.name, lesson.courseSequence),
+                teacher: lesson.teacher, position: lesson.position, day: lesson.day,
+                startSection, endSection, weeks: courseWeeks,
+                isTeachingBuilding3: lesson.isTeachingBuilding3,
+                ...(lesson.credit !== undefined ? { credit: lesson.credit } : {})
             });
         }
     }
-
-    // 4. 排序以便输出整洁美观
-    merged.sort((a, b) => {
-        if (a.day !== b.day) return a.day - b.day;
-        if (a.startSection !== b.startSection) return a.startSection - b.startSection;
-        return a.name.localeCompare(b.name);
-    });
-
-    return merged;
-}
-
-function isTeachingBuilding3(position) {
-    return /教3/.test(position);
+    return courses.sort((a, b) => a.day - b.day || a.startSection - b.startSection || a.name.localeCompare(b.name));
 }
 
 /** 从同一课表响应的课程列表中读取学分，按课程序号匹配，避免同名课程混淆。 */
@@ -175,66 +108,60 @@ function formatCourseName(name, courseSequence) {
 
 function parseTaskActivities(html) {
     const credits = parseCourseCredits(html);
-    const rawResults = [];
-    const blocks = html.split(/var\s+teachers\s*=/);
-
-    for (let i = 1; i < blocks.length; i++) {
-        const block = blocks[i];
-        let teacherName = "未知教师";
-        const tMatch = block.match(/actTeachers\s*=\s*\[\s*\{[\s\S]*?name:\s*"(.*?)"/);
-        if (tMatch) teacherName = tMatch[1];
-
-        const activityMatch = block.match(/new\s+TaskActivity\(([\s\S]*?)\);/);
-        if (!activityMatch) continue;
-
-        const args = powerSplit(activityMatch[1]);
-        const courseSequence = (args[2] || "").match(/\(([^()]*)\)$/)?.[1] || "";
-        const credit = credits.get(courseSequence);
-        const courseName = (args[3] || "未知课程").split('(')[0];
-        const position = (args[5] || "未知地点").replace(/\(.*?\)/g, "");
-        const weeksBitmap = args[6] || "";
-
-        const weeks = [];
-        for (let j = 0; j < weeksBitmap.length; j++) {
-            if (weeksBitmap[j] === '1') weeks.push(j);
-        }
-
-        const unitCountMatch = html.match(/unitCount\s*=\s*(\d+)/);
-        const unitCount = unitCountMatch ? parseInt(unitCountMatch[1]) : 14;
-
-        const idxRegex = /index\s*=\s*(\d+)\s*\*\s*unitCount\s*\+\s*(\d+);/g;
-        let m;
-        while ((m = idxRegex.exec(block)) !== null) {
-            const day = parseInt(m[1]) + 1;
-            const section = parseInt(m[2]) + 1;
-
-            rawResults.push({
-                "name": formatCourseName(courseName, courseSequence),
-                "courseSequence": courseSequence,
-                ...(credit !== undefined ? { credit } : {}),
-                "teacher": teacherName,
-                "position": position,
-                "day": day,
-                "startSection": section,
-                "endSection": section,
-                "weeks": weeks,
-                "isTeachingBuilding3": isTeachingBuilding3(position)
-            });
+    const lessons = [];
+    for (const block of html.split(/var\s+teachers\s*=/).slice(1)) {
+        const activities = [...block.matchAll(/new\s+TaskActivity\(([\s\S]*?)\);/g)];
+        let teacher = "未知教师";
+        for (let i = 0; i < activities.length; i++) {
+            const activity = activities[i];
+            const before = block.slice(i ? activities[i - 1].index + activities[i - 1][0].length : 0, activity.index);
+            const teachers = before.match(/actTeachers\s*=\s*(\[[\s\S]*?\])/);
+            if (teachers) {
+                teacher = [...teachers[1].matchAll(/name\s*:\s*["'](.*?)["']/g)].map(m => m[1]).join("、") || "未知教师";
+            }
+            const args = powerSplit(activity[1]);
+            const courseSequence = (args[2] || "").match(/\(([^()]*)\)$/)?.[1] || "";
+            const credit = credits.get(courseSequence);
+            const position = (args[5] || "未知地点").replace(/\(.*?\)/g, "");
+            const weeks = [...(args[6] || "")].flatMap((bit, week) => bit === "1" ? [week] : []);
+            const indexes = block.slice(activity.index + activity[0].length, activities[i + 1]?.index)
+                .matchAll(/index\s*=\s*(\d+)\s*\*\s*unitCount\s*\+\s*(\d+);/g);
+            for (const index of indexes) {
+                lessons.push({
+                    name: (args[3] || "未知课程").split('(')[0], courseSequence,
+                    teacher, position, day: Number(index[1]) + 1,
+                    startSection: Number(index[2]) + 1, endSection: Number(index[2]) + 1,
+                    weeks, isTeachingBuilding3: /教3/.test(position),
+                    ...(credit !== undefined ? { credit } : {})
+                });
+            }
         }
     }
-
-    // 执行全局合并逻辑
-    return mergeContinuousLessons(rawResults);
+    return mergeContinuousLessons(lessons);
 }
 
-async function requestResponse(url, options = {}) {
-    const res = await fetch(url, { credentials: "include", ...options });
-    if (!res.ok) throw new Error(`网络请求失败: ${res.status}`);
-    return res;
-}
-
-async function request(url, options = {}) {
-    return await (await requestResponse(url, options)).text();
+async function request(path, body) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try {
+        const res = await fetch(`http://jwgl2018.xatu.edu.cn/eams/${path}`, {
+            credentials: "include", signal: controller.signal,
+            ...(body !== undefined ? {
+                method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body
+            } : {})
+        });
+        if (!res.ok) throw new Error(`教务请求失败：HTTP ${res.status}`);
+        const html = await res.text();
+        if (/<input\b[^>]*\btype\s*=\s*["']password["']/i.test(html)) {
+            throw new Error("教务登录已失效，请重新登录");
+        }
+        return { html, serverTime: Date.parse(res.headers.get("Date") || "") };
+    } catch (e) {
+        if (controller.signal.aborted) throw new Error("教务请求超时，请稍后重试");
+        throw e;
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 /** 根据教务首页的当前教学周，推算第一教学周的周一（北京时间）。 */
@@ -256,72 +183,56 @@ function inferCurrentSemester(html, referenceTime) {
     const daysSinceMonday = (start.getUTCDay() + 6) % 7;
     start.setUTCDate(start.getUTCDate() - daysSinceMonday - (week - 1) * 7);
 
-    // 学期选择器没有起止日期；按推算出的起始月份识别本校的秋季/春季学期。
-    const isAutumn = start.getUTCMonth() >= 6;
-    const schoolYearStart = start.getUTCFullYear() - (isAutumn ? 0 : 1);
     return {
-        schoolYear: `${schoolYearStart}-${schoolYearStart + 1}`,
-        term: isAutumn ? "1" : "2",
         semesterStartDate: start.toISOString().slice(0, 10),
         semesterTotalWeeks: totalWeeks
     };
 }
 
 async function getCurrentSemesterConfig(semester) {
+    if (!semester.isCurrent) {
+        window.shiguangBridge.showToast("历史或其他学期开学日期请手动设置");
+        return null;
+    }
     try {
-        const res = await requestResponse("http://jwgl2018.xatu.edu.cn/eams/homeExt!main.action?sf_request_type=ajax");
-        const serverTime = Date.parse(res.headers.get("Date") || "");
-        const current = inferCurrentSemester(await res.text(), Number.isFinite(serverTime) ? serverTime : Date.now());
+        const { html, serverTime } = await request("homeExt!main.action?sf_request_type=ajax");
+        const current = inferCurrentSemester(html, Number.isFinite(serverTime) ? serverTime : Date.now());
         if (!current) throw new Error("未能识别当前教学周");
-        if (semester.schoolYear !== current.schoolYear || semester.term !== current.term) {
-            window.shiguangBridge.showToast("历史或其他学期开学日期请手动设置");
-            return null;
-        }
-        return {
-            semesterStartDate: current.semesterStartDate,
-            semesterTotalWeeks: current.semesterTotalWeeks
-        };
+        return current;
     } catch (e) {
         console.warn(`[开学日期推算] ${e.message}`);
-        window.shiguangBridge.showToast("无法推算开学日期，请在导入后手动设置");
+        window.shiguangBridge.showToast(`${e.message}；开学日期请手动设置`);
         return null;
     }
 }
 
 async function detectParameters() {
-    const html = await request("http://jwgl2018.xatu.edu.cn/eams/courseTableForStd.action?sf_request_type=ajax");
+    const { html } = await request("courseTableForStd.action?sf_request_type=ajax");
     const idsMatch = html.match(/bg\.form\.addInput\(form,"ids","(\d+)"\)/);
     const tagIdMatch = html.match(/id="(semesterBar\d+Semester)"/);
     if (!idsMatch || !tagIdMatch) return null;
     return { ids: idsMatch[1], tagId: tagIdMatch[1] };
 }
 
-async function getSelectedSemester(tagId) {
-    const raw = await request(`http://jwgl2018.xatu.edu.cn/eams/dataQuery.action?sf_request_type=ajax`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: `tagId=${encodeURIComponent(tagId)}&dataType=semesterCalendar`
-    });
-    const data = Function(`return (${raw});`)();
-    const list = [];
-    for (let key in data.semesters) {
-        data.semesters[key].forEach(s => list.push({
-            id: s.id,
-            schoolYear: s.schoolYear,
-            term: String(s.name),
-            name: `${s.schoolYear} ${s.name}学期`
-        }));
-    }
-    const idx = await window.shiguangBridgePromise.showSingleSelection("选择学期", JSON.stringify(list.map(s => s.name)), -1);
-    return idx !== null ? list[idx] : null;
+async function getSelectedSemester({ tagId }) {
+    const { html } = await request("dataQuery.action?sf_request_type=ajax",
+        `tagId=${encodeURIComponent(tagId)}&dataType=semesterCalendar`);
+    const data = Function(`return (${html});`)();
+    const list = Object.values(data.semesters).flat().map(s => ({
+        id: s.id, name: `${s.schoolYear} ${s.name}学期`,
+        isCurrent: String(s.id) === String(data.semesterId)
+    }));
+    const currentIndex = list.findIndex(s => s.isCurrent);
+    if (currentIndex < 0) throw new Error("无法匹配教务当前学期，请更新适配脚本");
+    const idx = await window.shiguangBridgePromise.showSingleSelection("选择学期",
+        JSON.stringify(list.map(s => s.name + (s.isCurrent ? "（当前学期）" : ""))),
+        currentIndex);
+    return Number.isInteger(idx) && idx >= 0 ? list[idx] : null;
 }
 
 async function fetchAndParseCourses(semesterId, ids) {
-    const html = await request(`http://jwgl2018.xatu.edu.cn/eams/courseTableForStd!courseTable.action?sf_request_type=ajax`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: `ignoreHead=1&setting.kind=std&semester.id=${semesterId}&ids=${ids}`
-    });
+    const { html } = await request("courseTableForStd!courseTable.action?sf_request_type=ajax",
+        `ignoreHead=1&setting.kind=std&semester.id=${encodeURIComponent(semesterId)}&ids=${encodeURIComponent(ids)}`);
     return parseTaskActivities(html);
 }
 
@@ -381,7 +292,7 @@ async function getOptionalExamCourses(semester, config) {
         "是否同时导入考试安排", JSON.stringify(["仅导入课程", "同时导入已排定考试（单次课程）"]), 0);
     if (choice !== 1) return [];
     try {
-        const html = await request(`http://jwgl2018.xatu.edu.cn/eams/stdExamTable!examTable.action?semester.id=${encodeURIComponent(semester.id)}&examBatch.id=0`);
+        const { html } = await request(`stdExamTable!examTable.action?semester.id=${encodeURIComponent(semester.id)}&examBatch.id=0`);
         const exams = parseExamCourses(html, config);
         window.shiguangBridge.showToast(exams.length ? `已读取 ${exams.length} 场考试` : "当前学期暂无可导入的已排定考试");
         return exams;
@@ -432,7 +343,7 @@ async function runImportFlow() {
         const params = await detectParameters();
         if (!params) throw new Error("未能识别教务参数，请确认已登录");
 
-        const semester = await getSelectedSemester(params.tagId);
+        const semester = await getSelectedSemester(params);
         if (!semester) return;
 
         window.shiguangBridge.showToast("正在同步课表...");
@@ -446,9 +357,11 @@ async function runImportFlow() {
         const config = await getCurrentSemesterConfig(semester);
         const exams = await getOptionalExamCourses(semester, config);
         courses = courses.concat(exams);
-        await applyTimeSlots();
+        if (!await applyTimeSlots()) throw new Error("作息时间保存失败，导入未完成");
         if (config) {
-            await window.shiguangBridgePromise.saveCourseConfig(JSON.stringify(config));
+            if (!await window.shiguangBridgePromise.saveCourseConfig(JSON.stringify(config))) {
+                throw new Error("学期配置保存失败，导入未完成");
+            }
             window.shiguangBridge.showToast(`已推算第一教学周周一为 ${config.semesterStartDate}`);
         }
         const saveResult = await window.shiguangBridgePromise.saveImportedCourses(JSON.stringify(courses));
@@ -456,7 +369,7 @@ async function runImportFlow() {
         if (saveResult) {
             window.shiguangBridge.showToast(`成功导入 ${courses.length} 个课程条目`);
             window.shiguangBridge.notifyTaskCompletion();
-        }
+        } else throw new Error("课程保存失败，导入未完成");
     } catch (e) {
         console.error(`[异常] ${e.message}`);
         window.shiguangBridge.showToast(e.message);
