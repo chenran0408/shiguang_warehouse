@@ -67,8 +67,10 @@ function mergeContinuousLessons(lessons) {
                 name: formatCourseName(lesson.name, lesson.courseSequence),
                 teacher: lesson.teacher, position: lesson.position, day: lesson.day,
                 startSection, endSection, weeks: courseWeeks,
-                isTeachingBuilding3: lesson.isTeachingBuilding3,
-                ...(lesson.credit !== undefined ? { credit: lesson.credit } : {})
+                credit: lesson.credit,
+                ...(/教3/.test(lesson.position) && startSection === 3 && endSection === 4 ? {
+                    isCustomTime: true, customStartTime: "10:10", customEndTime: "11:40"
+                } : {})
             });
         }
     }
@@ -91,7 +93,7 @@ function parseCourseCredits(html) {
             if (row === header || row.closest("table") !== table) continue;
             const sequence = row.cells[sequenceIndex]?.textContent.trim();
             const text = row.cells[creditIndex]?.textContent.trim();
-            if (!sequence || !text || !/^\d+(?:\.\d+)?$/.test(text)) continue;
+            if (!sequence || !/^\d+(?:\.\d+)?$/.test(text)) continue;
             const credit = Number(text);
             if (!Number.isFinite(credit)) continue;
             // 同一序号出现矛盾值时不猜测；合法的 0 学分需要保留。
@@ -131,8 +133,7 @@ function parseTaskActivities(html) {
                     name: (args[3] || "未知课程").split('(')[0], courseSequence,
                     teacher, position, day: Number(index[1]) + 1,
                     startSection: Number(index[2]) + 1, endSection: Number(index[2]) + 1,
-                    weeks, isTeachingBuilding3: /教3/.test(position),
-                    ...(credit !== undefined ? { credit } : {})
+                    weeks, credit
                 });
             }
         }
@@ -227,7 +228,7 @@ async function getSelectedSemester({ tagId }) {
     const idx = await window.shiguangBridgePromise.showSingleSelection("选择学期",
         JSON.stringify(list.map(s => s.name + (s.isCurrent ? "（当前学期）" : ""))),
         currentIndex);
-    return Number.isInteger(idx) && idx >= 0 ? list[idx] : null;
+    return idx === null ? null : list[idx];
 }
 
 async function fetchAndParseCourses(semesterId, ids) {
@@ -305,36 +306,14 @@ async function getOptionalExamCourses(semester, config) {
 
 async function applyTimeSlots() {
     const slots = [
-        { "number": 1, "startTime": "08:20", "endTime": "09:05" }, 
-        { "number": 2, "startTime": "09:15", "endTime": "10:00" },
-        { "number": 3, "startTime": "10:20", "endTime": "11:05" },
-        { "number": 4, "startTime": "11:15", "endTime": "12:00" },
-        { "number": 5, "startTime": "14:00", "endTime": "14:45" },
-        { "number": 6, "startTime": "14:55", "endTime": "15:40" },
-        { "number": 7, "startTime": "16:00", "endTime": "16:45" }, 
-        { "number": 8, "startTime": "16:55", "endTime": "17:40" },
-        { "number": 9, "startTime": "18:10", "endTime": "18:55" }, 
-        { "number": 10, "startTime": "19:05", "endTime": "19:50" },
-        { "number": 11, "startTime": "20:00", "endTime": "20:45" },
-        { "number": 12, "startTime": "20:55", "endTime": "21:40" },
-    ];
+        ["08:20", "09:05"], ["09:15", "10:00"],
+        ["10:20", "11:05"], ["11:15", "12:00"],
+        ["14:00", "14:45"], ["14:55", "15:40"],
+        ["16:00", "16:45"], ["16:55", "17:40"],
+        ["18:10", "18:55"], ["19:05", "19:50"],
+        ["20:00", "20:45"], ["20:55", "21:40"]
+    ].map(([startTime, endTime], i) => ({ number: i + 1, startTime, endTime }));
     return await window.shiguangBridgePromise.savePresetTimeSlots(JSON.stringify(slots));
-}
-
-
-function adjustTeachingBuilding3Courses(courses) {
-    return courses.map(course => {
-        // 检查是否是教3楼且正好是第3-4节两节课
-        if (course.isTeachingBuilding3 && 
-            course.startSection === 3 && 
-            course.endSection === 4) {
-            // 设置为自定义时间模式
-            course.isCustomTime = true;
-            course.customStartTime = "10:10";
-            course.customEndTime = "11:40";
-        }
-        return course;
-    });
 }
 
 async function runImportFlow() {
@@ -349,10 +328,7 @@ async function runImportFlow() {
         window.shiguangBridge.showToast("正在同步课表...");
         let courses = await fetchAndParseCourses(semester.id, params.ids);
         
-        if (!courses || courses.length === 0) throw new Error("未解析到课程数据");
-
-        // 调整教3楼课程时间
-        courses = adjustTeachingBuilding3Courses(courses);
+        if (!courses.length) throw new Error("未解析到课程数据");
 
         const config = await getCurrentSemesterConfig(semester);
         const exams = await getOptionalExamCourses(semester, config);
@@ -364,12 +340,11 @@ async function runImportFlow() {
             }
             window.shiguangBridge.showToast(`已推算第一教学周周一为 ${config.semesterStartDate}`);
         }
-        const saveResult = await window.shiguangBridgePromise.saveImportedCourses(JSON.stringify(courses));
-        
-        if (saveResult) {
-            window.shiguangBridge.showToast(`成功导入 ${courses.length} 个课程条目`);
-            window.shiguangBridge.notifyTaskCompletion();
-        } else throw new Error("课程保存失败，导入未完成");
+        if (!await window.shiguangBridgePromise.saveImportedCourses(JSON.stringify(courses))) {
+            throw new Error("课程保存失败，导入未完成");
+        }
+        window.shiguangBridge.showToast(`成功导入 ${courses.length} 个课程条目`);
+        window.shiguangBridge.notifyTaskCompletion();
     } catch (e) {
         console.error(`[异常] ${e.message}`);
         window.shiguangBridge.showToast(e.message);
