@@ -32,7 +32,6 @@ function powerSplit(paramsRaw) {
 
 function cleanArg(s) {
     s = s.trim();
-    if (s === "null") return null;
     return s.replace(/^["']|["']$/g, "");
 }
 
@@ -44,7 +43,7 @@ function mergeContinuousLessons(lessons) {
         if (!groups.has(key)) groups.set(key, { lesson, weeks: Array.from({ length: 50 }, () => new Set()) });
         const { weeks } = groups.get(key);
         for (const week of lesson.weeks) {
-            if (week < 0 || week >= 50) continue;
+            if (week >= 50) continue;
             for (let section = lesson.startSection; section <= lesson.endSection; section++) weeks[week].add(section);
         }
     }
@@ -64,7 +63,7 @@ function mergeContinuousLessons(lessons) {
         for (const [key, courseWeeks] of blocks) {
             const [startSection, endSection] = key.split('-').map(Number);
             courses.push({
-                name: formatCourseName(lesson.name, lesson.courseSequence),
+                name: lesson.courseSequence ? `${lesson.name} | ${lesson.courseSequence}` : lesson.name,
                 teacher: lesson.teacher, position: lesson.position, day: lesson.day,
                 startSection, endSection, weeks: courseWeeks,
                 credit: lesson.credit,
@@ -90,22 +89,13 @@ function parseCourseCredits(html) {
         const sequenceIndex = headers.indexOf("课程序号");
         if (sequenceIndex < 0) continue;
         for (const row of table.rows) {
-            if (row === header || row.closest("table") !== table) continue;
             const sequence = row.cells[sequenceIndex]?.textContent.trim();
             const text = row.cells[creditIndex]?.textContent.trim();
             if (!sequence || !/^\d+(?:\.\d+)?$/.test(text)) continue;
-            const credit = Number(text);
-            if (!Number.isFinite(credit)) continue;
-            // 同一序号出现矛盾值时不猜测；合法的 0 学分需要保留。
-            if (credits.has(sequence) && credits.get(sequence) !== credit) credits.set(sequence, undefined);
-            else if (!credits.has(sequence)) credits.set(sequence, credit);
+            credits.set(sequence, Number(text));
         }
     }
     return credits;
-}
-
-function formatCourseName(name, courseSequence) {
-    return courseSequence ? `${name} | ${courseSequence}` : name;
 }
 
 function parseTaskActivities(html) {
@@ -153,9 +143,6 @@ async function request(path, body) {
         });
         if (!res.ok) throw new Error(`教务请求失败：HTTP ${res.status}`);
         const html = await res.text();
-        if (/<input\b[^>]*\btype\s*=\s*["']password["']/i.test(html)) {
-            throw new Error("教务登录已失效，请重新登录");
-        }
         return { html, serverTime: Date.parse(res.headers.get("Date") || "") };
     } catch (e) {
         if (controller.signal.aborted) throw new Error("教务请求超时，请稍后重试");
@@ -176,7 +163,7 @@ function inferCurrentSemester(html, referenceTime) {
 
     const week = Number(weekText);
     const totalWeeks = Number(totalMatch[1]);
-    if (week < 1 || week > totalWeeks || totalWeeks > 53 || !Number.isFinite(referenceTime)) return null;
+    if (week < 1 || week > totalWeeks || totalWeeks > 53) return null;
 
     // 固定按教务的 UTC+8 日期计算第一周周一。
     const start = new Date(referenceTime + 8 * 3600000);
@@ -261,19 +248,16 @@ async function runImportFlow() {
         
         if (!courses.length) throw new Error("未解析到课程数据");
 
-        const config = semester.isCurrent ? {
-            semesterStartDate: current.semesterStartDate,
-            semesterTotalWeeks: current.semesterTotalWeeks
-        } : null;
         if (current && !semester.isCurrent) window.shiguangBridge.showToast("历史或其他学期开学日期请手动设置");
         if (!await applyTimeSlots()) {
             console.error("作息时间保存失败，导入未完成");
             return;
         }
-        if (config) {
-            if (!await window.shiguangBridgePromise.saveCourseConfig(JSON.stringify(config))) {
-                throw new Error("学期配置保存失败，导入未完成");
-            }
+        if (semester.isCurrent && !await window.shiguangBridgePromise.saveCourseConfig(JSON.stringify({
+            semesterStartDate: current.semesterStartDate,
+            semesterTotalWeeks: current.semesterTotalWeeks
+        }))) {
+            throw new Error("学期配置保存失败，导入未完成");
         }
         if (!await window.shiguangBridgePromise.saveImportedCourses(JSON.stringify(courses))) {
             throw new Error("课程保存失败，导入未完成");
